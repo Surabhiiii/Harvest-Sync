@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>harvest sync project</title>
+    <style>
+        /* standard jd green and tractor blue colors */
+        body { font-family: sans-serif; background: #222; color: #fff; padding: 20px; }
+        .container { display: flex; gap: 20px; justify-content: center; }
+        canvas { background: #111; border: 2px solid #555; border-radius: 8px; }
+        .panel { background: #333; padding: 15px; border-radius: 8px; width: 320px; }
+        
+        /* stats box for all the live sensor data */
+        .stats { 
+            background: #444; padding: 10px; margin-bottom: 10px; 
+            font-family: monospace; border-left: 4px solid #46C7D6; 
+        }
+        
+        .stop-btn { width: 100%; padding: 15px; background: #c00; color: #fff; font-weight: bold; cursor: pointer; border: none; }
+        .stop-active { background: #ffea00; color: #000; }
+        
+        label { display: block; margin-top: 15px; font-size: 11px; color: #aaa; }
+        input[type=range] { width: 100%; }
+        .val { color: #46C7D6; float: right; font-weight: bold; }
+        .full { color: #ff3300; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h2 style="text-align:center;">harvester sync and fill sim</h2>
+    
+    <div class="container">
+        <canvas id="field" width="600" height="550"></canvas>
+
+        <div class="panel">
+            <button id="estop" class="stop-btn">EMERGENCY STOP</button>
+            
+            <label>harvester speed (km/h)</label>
+            <input type="range" id="hSpeedSlider" min="0" max="14" step="0.5" value="8">
+
+            <label>chute pivot speed (hydraulics)</label>
+            <input type="range" id="pSpeedSlider" min="0.01" max="0.3" step="0.01" value="0.08">
+            
+            <hr style="border: 0; border-top: 1px solid #444; margin: 20px 0;">
+            
+            <div class="stats">
+                <div>harvester: <span class="val"><span id="hSpd">0.0</span> km/h</span></div>
+                <div>tractor:   <span class="val"><span id="tSpd">0.0</span> km/h</span></div>
+                <div style="color:#fff">sync error: <span class="val"><span id="dist">0.0</span> m</span></div>
+                <div>chute to cab: <span class="val"><span id="relDist">0.0</span> m</span></div>
+                <div style="color:#fff">chute angle: <span class="val"><span id="chDeg">0</span>&deg;</span></div>
+                
+                <hr style="border-color:#555">
+                <div style="color:#fff">fill quantity: <span class="val"><span id="vol">0.0</span> m&sup3;</span></div>
+                <div style="color:#fff">fill level: <span class="val" id="fillBox"><span id="fill">0</span>%</span></div>
+            </div>
+
+            <button id="resetBtn">reset trailer</button>
+            <button id="bumpBtn">bump tractor back</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('field');
+    const ctx = canvas.getContext('2d');
+
+    let hSpeed = 8.0, hTarget = 8.0, tSpeed = 0.0, gap = 4.0; 
+    let moveSpeed = 0.08; 
+    let stopped = false;
+    let grid = new Array(18).fill(0); 
+    let particles = [];
+    let angle = 0; 
+    const length = 85; 
+    const max_volume = 40.0;
+
+    document.getElementById('hSpeedSlider').oninput = (e) => hTarget = parseFloat(e.target.value);
+    document.getElementById('pSpeedSlider').oninput = (e) => moveSpeed = parseFloat(e.target.value);
+    document.getElementById('resetBtn').onclick = () => {
+        grid.fill(0);
+        document.getElementById('fillBox').classList.remove('full');
+    };
+    document.getElementById('bumpBtn').onclick = () => gap += 3.5; 
+    document.getElementById('estop').onclick = function() {
+        stopped = !stopped;
+        this.classList.toggle('stop-active', stopped);
+        this.innerText = stopped ? "RESET SYSTEM" : "EMERGENCY STOP";
+    };
+
+    function loop(dt) {
+        if (stopped) { hSpeed = 0; tSpeed = 0; return; }
+
+        hSpeed += (hTarget - hSpeed) * 0.05;
+        tSpeed = hSpeed - (gap * 2.0);
+        if (tSpeed < 0) tSpeed = 0;
+
+        let delta = (tSpeed - hSpeed) / 3.6;
+        gap += delta * dt;
+
+        let low = grid.indexOf(Math.min(...grid));
+        let row = Math.floor(low / 3);
+        let targetAngle = (row - 2.5) * 0.25; 
+        angle += (targetAngle - angle) * moveSpeed;
+
+        let tx = 300 + length * Math.cos(angle);
+        let ty = 210 + length * Math.sin(angle);
+        let cx = 405, cy = (170 + (gap * 20)) - 20;
+        
+        let dx = tx - cx, dy = ty - cy;
+        let meters = Math.sqrt(dx*dx + dy*dy) / 20;
+        
+        document.getElementById('relDist').innerText = meters.toFixed(1);
+        document.getElementById('chDeg').innerText = (angle * (180/Math.PI)).toFixed(0);
+
+        let currentFill = (grid.reduce((a, b) => a + b, 0) / 18 * 100);
+        let isFull = currentFill >= 99.9;
+
+        if (Math.abs(gap) < 1.0 && hSpeed > 0.5 && !isFull) {
+            grid[low] += 0.005; 
+            if (Math.random() > 0.6) {
+                particles.push({tipX: tx, tipY: ty, tarX: 400, tarY: 170 + (gap*20) + (row*15), life: 0});
+            }
+        } else if (isFull) {
+            document.getElementById('fillBox').classList.add('full');
+        }
+
+        particles.forEach(p => p.life += 0.03);
+        particles = particles.filter(p => p.life < 1);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, 600, 550);
+        ctx.fillStyle = "#2e7d32";
+        ctx.fillRect(280, 170, 40, 80);
+        ctx.fillStyle = "white";
+        ctx.beginPath(); ctx.arc(300, 210, 4, 0, 7); ctx.fill(); 
+        ctx.strokeStyle = "#bbb"; ctx.lineWidth = 6; ctx.beginPath();
+        ctx.moveTo(300, 210);
+        let chuteX = 300 + length * Math.cos(angle);
+        let chuteY = 210 + Math.sin(angle) * length;
+        ctx.lineTo(chuteX, chuteY); ctx.stroke();
+        let yPos = 170 + (gap * 20); 
+        ctx.fillStyle = "#444"; ctx.fillRect(380, yPos, 50, 100); 
+        ctx.fillStyle = "#1565c0"; ctx.fillRect(385, yPos - 40, 40, 40); 
+        ctx.save(); ctx.setLineDash([5, 5]); ctx.strokeStyle = "#46C7D6";
+        ctx.beginPath(); ctx.moveTo(chuteX, chuteY); ctx.lineTo(405, yPos - 20); ctx.stroke(); ctx.restore();
+        let txt = document.getElementById('relDist').innerText + "m @ " + document.getElementById('chDeg').innerText + "deg";
+        ctx.fillStyle = "#46C7D6"; ctx.font = "bold 11px monospace";
+        ctx.fillText(txt, (chuteX + 405)/2 + 10, (chuteY + yPos - 20)/2);
+        for(let i=0; i<18; i++) {
+            if(grid[i] > 0) {
+                ctx.fillStyle = `rgba(255, 215, 0, ${grid[i]})`;
+                ctx.fillRect(385 + (i%3 * 14), yPos + 5 + (Math.floor(i/3)*15), 12, 12);
+            }
+        }
+        ctx.fillStyle = "gold";
+        particles.forEach(p => {
+            let px = p.tipX + (p.tarX - p.tipX) * p.life;
+            let py = p.tipY + (p.tarY - p.tipY) * p.life - Math.sin(p.life * Math.PI) * 15;
+            ctx.fillRect(px, py, 3, 3);
+        });
+        document.getElementById('hSpd').innerText = hSpeed.toFixed(1);
+        document.getElementById('tSpd').innerText = tSpeed.toFixed(1);
+        document.getElementById('dist').innerText = gap.toFixed(2);
+        let pct = (grid.reduce((a, b) => a + b, 0) / 18 * 100);
+        document.getElementById('fill').innerText = pct >= 100 ? "100" : pct.toFixed(0);
+        document.getElementById('vol').innerText = (pct / 100 * max_volume).toFixed(1);
+    }
+
+    function start() { loop(0.016); draw(); requestAnimationFrame(start); }
+    start();
+</script>
+</body>
+</html>
