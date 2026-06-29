@@ -141,7 +141,7 @@ html_content = """
         // pythagoras to find distance from chute tip to driver
         let dx = tx - cx; 
         let dy = ty - cy;
-        let meters = Math.sqrt(dx*dx + dy*dy) / 20; // 20 pixels = 1 meter
+        let meters = Math.sqrt(dx*dx + dy*dy) / 18; // 18 pixels = 1 meter
         
         document.getElementById('relDist').innerText = meters.toFixed(1);
         document.getElementById('chDeg').innerText = (angle * (180/Math.PI)).toFixed(0);
